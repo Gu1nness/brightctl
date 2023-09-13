@@ -3,13 +3,14 @@ use crate::enums::{DeltaType, Sign, ValueType};
 use crate::structs::Value;
 use crate::utils::{percent_to_val, val_to_percent};
 use glob::glob;
+use std::borrow::Cow;
 use std::fs;
 use std::{path::PathBuf, str::FromStr};
 
 #[derive(Debug, Clone)]
 pub struct Device {
-    class: String,
-    id: String,
+    class: Cow<'static, str>,
+    id: Cow<'static, str>,
     curr_brightness: u64,
     max_brightness: u64,
 }
@@ -21,10 +22,10 @@ impl Device {
     pub fn get_curr_brightness(&self) -> u64 {
         self.curr_brightness
     }
-    pub fn get_id(&self) -> &String {
+    pub fn get_id(&self) -> &str {
         &self.id
     }
-    pub fn get_class(&self) -> &String {
+    pub fn get_class(&self) -> &str {
         &self.class
     }
 
@@ -65,8 +66,8 @@ impl Device {
 mod tests {
     use super::*;
     static DEVICE: Device = Device {
-        id: String::from_str("blah").unwrap(),
-        class: String::from_str("blah").unwrap(),
+        id: Cow::Borrowed("blah"),
+        class: Cow::Borrowed("blah"),
         curr_brightness: 100,
         max_brightness: 200,
     };
@@ -180,7 +181,7 @@ impl std::fmt::Display for Device {
     }
 }
 
-pub fn read_device(path: PathBuf, class: String, id: String) -> Device {
+pub fn read_device(path: PathBuf, class: &'static str, id: String) -> Device {
     let read_brightness =
         fs::read_to_string(format!("{}/{}", path.display(), "brightness")).unwrap();
     let read_max_brightness =
@@ -200,8 +201,8 @@ pub fn read_device(path: PathBuf, class: String, id: String) -> Device {
         }
     };
     Device {
-        class,
-        id,
+        class: Cow::Borrowed(class),
+        id: Cow::Owned(id),
         curr_brightness,
         max_brightness,
     }
@@ -219,7 +220,10 @@ pub fn write_device(device: &Device, value: &Value) -> Option<Device> {
     match fs::write(path, format!("{}", new_val)) {
         Ok(_) => Some(read_device(
             PathBuf::from(prefix),
-            device.get_class().to_string(),
+            match &device.class {
+                Cow::Borrowed(class) => class,
+                Cow::Owned(_) => panic!("String is owned here, shouldn't happen"),
+            },
             device.get_id().to_string()
         )),
         Err(err) => {
@@ -229,7 +233,7 @@ pub fn write_device(device: &Device, value: &Value) -> Option<Device> {
     }
 }
 
-pub fn read_class(class: &str) -> Vec<Device> {
+pub fn read_class(class: &'static str) -> Vec<Device> {
     let concat_path: &String = &format!("{}/{}/*", consts::PATH, class);
     let mut device_ret: Vec<Device> = Vec::new();
     for entry in glob(concat_path).unwrap() {
@@ -238,8 +242,8 @@ pub fn read_class(class: &str) -> Vec<Device> {
                 device_ret.push(
                     read_device(
                         path.clone(),
-                        String::from_str(class).unwrap(),
-                        path.file_name().unwrap().to_str().unwrap().to_owned(),
+                        class,
+                        path.file_name().unwrap().to_string_lossy().into_owned()
                         )
                     )
             },
