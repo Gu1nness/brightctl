@@ -1,8 +1,7 @@
-use crate::enums::{ValueType, DeltaType, Sign};
+use crate::enums::{DeltaType, Sign, ValueType};
 use regex::Regex;
 use std::process::exit;
 use std::str::FromStr;
-
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Value {
@@ -14,15 +13,15 @@ pub struct Value {
 
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
+        writeln!(
             f,
-            "{},{:?},{:?},{:?}\n",
+            "{},{:?},{:?},{:?}",
             self.val, self.v_type, self.d_type, self.sign
         )
     }
 }
 
-pub fn parse_value(data: &String) -> Value {
+pub fn parse_value(data: &str) -> Value {
     let mut new_val = Value {
         val: 0,
         v_type: ValueType::ABSOLUTE,
@@ -30,7 +29,7 @@ pub fn parse_value(data: &String) -> Value {
         sign: Sign::PLUS,
     };
     let re = Regex::new(r"^(?P<value>\d+)(?P<percent>\%?)(?P<sign>[\+\-]?)").unwrap();
-    let cap_opt = re.captures(data.as_str());
+    let cap_opt = re.captures(data);
     let cap = match &cap_opt {
         None => {
             println!("Wrong format, expecting {}", re);
@@ -38,12 +37,12 @@ pub fn parse_value(data: &String) -> Value {
         }
         Some(data) => data,
     };
-    if &cap["value"] == "" {
+    if cap["value"].is_empty() {
         panic!("Invalid value")
     } else {
         new_val.val = u64::from_str(&cap["value"]).unwrap();
     }
-    if &cap["percent"] != "" {
+    if !cap["percent"].is_empty() {
         new_val.v_type = ValueType::RELATIVE
     }
     match &cap["sign"] {
@@ -57,7 +56,7 @@ pub fn parse_value(data: &String) -> Value {
         }
         _ => (),
     }
-    return new_val;
+    new_val
 }
 
 #[cfg(test)]
@@ -72,7 +71,7 @@ mod tests {
             d_type: DeltaType::DELTA,
             sign: Sign::PLUS,
         };
-        assert_eq!(parse_value(&String::from_str("50%+").unwrap()), val_1);
+        assert_eq!(parse_value("50%+"), val_1);
     }
 
     #[test]
@@ -83,7 +82,7 @@ mod tests {
             d_type: DeltaType::DELTA,
             sign: Sign::MINUS,
         };
-        assert_eq!(parse_value(&String::from_str("50%-").unwrap()), val_1);
+        assert_eq!(parse_value("50%-"), val_1);
     }
 
     #[test]
@@ -94,7 +93,7 @@ mod tests {
             d_type: DeltaType::DELTA,
             sign: Sign::MINUS,
         };
-        assert_eq!(parse_value(&String::from_str("50-").unwrap()), val_1);
+        assert_eq!(parse_value("50-"), val_1);
     }
 
     #[test]
@@ -105,7 +104,7 @@ mod tests {
             d_type: DeltaType::DIRECT,
             sign: Sign::PLUS,
         };
-        assert_eq!(parse_value(&String::from_str("50%").unwrap()), val_1);
+        assert_eq!(parse_value("50%"), val_1);
     }
 
     #[test]
@@ -116,7 +115,6 @@ mod tests {
             d_type: DeltaType::DIRECT,
             sign: Sign::PLUS,
         };
-        assert_eq!(parse_value(&String::from_str("50").unwrap()), val_1);
+        assert_eq!(parse_value("50"), val_1);
     }
 }
-
