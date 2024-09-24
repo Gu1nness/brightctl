@@ -1,13 +1,13 @@
 use clap::{Parser, Subcommand};
 
 pub mod consts;
-pub mod enums;
 pub mod device;
-pub mod utils;
+pub mod enums;
 pub mod structs;
+pub mod utils;
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about=None)]
+#[command(name = "Brightctl", author, version, about, long_about=None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -15,17 +15,14 @@ struct Cli {
     #[arg(short, long)]
     list: bool,
 
-    #[arg(short, long, default_value_t = false)]
-    quiet: bool,
-
     #[arg(long, default_value_t = false)]
     pretend: bool,
 
     #[arg(short = 'm', long, default_value_t = false)]
     machine_readable: bool,
 
-    #[arg(short = 'n', long, default_value_t = false)]
-    min_value: bool,
+    #[arg(short = 'n', long, default_value_t = 1)]
+    min_value: u64,
 
     #[arg(short, long, global = true)]
     device: Option<String>,
@@ -60,7 +57,7 @@ fn main() {
         }
     };
 
-    if !dev_.is_some() {
+    if dev_.is_none() {
         println!(
             "No device found for class {} and device name {}",
             cli.class.unwrap_or(String::from("''")),
@@ -69,6 +66,13 @@ fn main() {
         std::process::exit(1)
     }
     let device: &device::Device = dev_.unwrap();
+
+    let min_value = structs::Value {
+        val: cli.min_value,
+        v_type: enums::ValueType::ABSOLUTE,
+        d_type: enums::DeltaType::DIRECT,
+        sign: enums::Sign::PLUS,
+    };
 
     match &cli.command {
         Some(Commands::Info) | Some(Commands::I) | None => {
@@ -80,12 +84,10 @@ fn main() {
                         print!("{:+}", device)
                     }
                 }
+            } else if !cli.machine_readable {
+                print!("{}", device)
             } else {
-                if !cli.machine_readable {
-                    print!("{}", device)
-                } else {
-                    print!("{:+}", device)
-                }
+                print!("{:+}", device)
             }
         }
         Some(Commands::Get) | Some(Commands::G) => {
@@ -95,11 +97,13 @@ fn main() {
             println!("{}", device.get_max_brightness())
         }
         Some(Commands::Set { value }) | Some(Commands::S { value }) => {
-            let parsed_val: structs::Value = structs::parse_value(&value);
-            let new_dev = device::write_device(device, &parsed_val);
-            match new_dev {
-                Some(dev) => println!("{}", dev),
-                _ => ()
+            let parsed_val: structs::Value = structs::parse_value(value);
+            if device.get_max_brightness() < min_value.val {
+                println!("Invalid minimum value {}", min_value.val)
+            }
+            let new_dev = device::write_device(device, &parsed_val, &min_value, cli.pretend);
+            if let Some(dev) = new_dev {
+                println!("{}", dev)
             }
         }
     }

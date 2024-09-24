@@ -4,6 +4,7 @@ use crate::structs::Value;
 use crate::utils::{percent_to_val, val_to_percent};
 use glob::glob;
 use std::borrow::Cow;
+use std::cmp::max;
 use std::fs;
 use std::{path::PathBuf, str::FromStr};
 
@@ -37,20 +38,13 @@ impl Device {
             },
             DeltaType::DELTA => match value.v_type {
                 ValueType::ABSOLUTE => match value.sign {
-                    Sign::MINUS => match self.curr_brightness.checked_sub(value.val) {
-                        None => 0,
-                        Some(v) => v,
-                    },
+                    Sign::MINUS => self.curr_brightness.saturating_sub(value.val),
                     Sign::PLUS => value.val + self.curr_brightness,
                 },
                 ValueType::RELATIVE => {
                     let new_perc = match value.sign {
                         Sign::MINUS => {
-                            match val_to_percent(self.curr_brightness, self).checked_sub(value.val)
-                            {
-                                None => 0,
-                                Some(v) => v,
-                            }
+                            val_to_percent(self.curr_brightness, self).saturating_sub(value.val)
                         }
                         Sign::PLUS => val_to_percent(self.curr_brightness, self) + value.val,
                     };
@@ -158,9 +152,9 @@ mod tests {
 impl std::fmt::Display for Device {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         if f.sign_plus() {
-            write!(
+            writeln!(
                 f,
-                "{},{},{},{}%,{}\n",
+                "{},{},{},{}%,{}",
                 self.id,
                 self.class,
                 self.curr_brightness,
@@ -168,14 +162,14 @@ impl std::fmt::Display for Device {
                 self.max_brightness
             )
         } else {
-            write!(
-            f,
-            "Device '{}' of class '{}':\n\tCurrent brightness {} ({}%)\n\tMax brightness: {}\n\n",
-            self.id,
-            self.class,
-            self.curr_brightness,
-            val_to_percent(self.curr_brightness, self),
-            self.max_brightness
+            writeln!(
+                f,
+                "Device '{}' of class '{}':\n\tCurrent brightness {} ({}%)\n\tMax brightness: {}\n",
+                self.id,
+                self.class,
+                self.curr_brightness,
+                val_to_percent(self.curr_brightness, self),
+                self.max_brightness
             )
         }
     }
@@ -193,7 +187,7 @@ pub fn read_device(path: PathBuf, class: &'static str, id: String) -> Device {
             panic!()
         }
     };
-    let max_brightness = match u64::from_str(&read_max_brightness.trim_end_matches('\n')) {
+    let max_brightness = match u64::from_str(read_max_brightness.trim_end_matches('\n')) {
         Ok(value) => value,
         Err(err) => {
             println!("{:?}, read {:?}", err, read_max_brightness);
@@ -208,8 +202,13 @@ pub fn read_device(path: PathBuf, class: &'static str, id: String) -> Device {
     }
 }
 
-pub fn write_device(device: &Device, value: &Value) -> Option<Device> {
-    let new_val = device.compute_new_val(value);
+pub fn write_device(
+    device: &Device,
+    value: &Value,
+    min_value: &Value,
+    pretend: bool,
+) -> Option<Device> {
+    let new_val = max(device.compute_new_val(value), min_value.val);
     let prefix = format!(
         "{}/{}/{}",
         consts::PATH,
@@ -217,18 +216,23 @@ pub fn write_device(device: &Device, value: &Value) -> Option<Device> {
         device.get_id()
     );
     let path = format!("{}/{}", prefix, "brightness");
-    match fs::write(path, format!("{}", new_val)) {
-        Ok(_) => Some(read_device(
-            PathBuf::from(prefix),
-            match &device.class {
-                Cow::Borrowed(class) => class,
-                Cow::Owned(_) => panic!("String is owned here, shouldn't happen"),
-            },
-            device.get_id().to_string()
-        )),
-        Err(err) => {
-            println!("Failed to write device: {}", err);
-            Option::None
+    if pretend {
+        println!("Would set {} brightness to {}", device.get_class(), new_val);
+        Option::None
+    } else {
+        match fs::write(path, format!("{}", new_val)) {
+            Ok(_) => Some(read_device(
+                PathBuf::from(prefix),
+                match &device.class {
+                    Cow::Borrowed(class) => class,
+                    Cow::Owned(_) => panic!("String is owned here, shouldn't happen"),
+                },
+                device.get_id().to_string(),
+            )),
+            Err(err) => {
+                println!("Failed to write device: {}", err);
+                Option::None
+            }
         }
     }
 }
@@ -238,15 +242,11 @@ pub fn read_class(class: &'static str) -> Vec<Device> {
     let mut device_ret: Vec<Device> = Vec::new();
     for entry in glob(concat_path).unwrap() {
         match entry {
-            Ok(path) => {
-                device_ret.push(
-                    read_device(
-                        path.clone(),
-                        class,
-                        path.file_name().unwrap().to_string_lossy().into_owned()
-                        )
-                    )
-            },
+            Ok(path) => device_ret.push(read_device(
+                path.clone(),
+                class,
+                path.file_name().unwrap().to_string_lossy().into_owned(),
+            )),
             Err(error) => println!("{:?}", error),
         }
     }
