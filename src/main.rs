@@ -1,9 +1,11 @@
+use std::{process::exit, str::FromStr};
+
 use clap::{Parser, Subcommand};
+use enums::ValueUpdate;
 
 pub mod consts;
 pub mod device;
 pub mod enums;
-pub mod structs;
 pub mod utils;
 
 #[derive(Parser, Debug)]
@@ -21,8 +23,8 @@ struct Cli {
     #[arg(short = 'm', long, default_value_t = false)]
     machine_readable: bool,
 
-    #[arg(short = 'n', long, default_value_t = 1)]
-    min_value: u64,
+    #[arg(short = 'n', long, default_value = "1", help = "N{%}{+-}")]
+    min_value: String,
 
     #[arg(short, long, global = true)]
     device: Option<String>,
@@ -45,15 +47,13 @@ enum Commands {
 
 fn main() {
     let cli = Cli::parse();
-    let devices: Vec<device::Device> = device::read_devices();
-    let dev_: Option<&device::Device> = {
-        match (&cli.class, &cli.device) {
-            (Some(class), Some(dev)) => devices
-                .iter()
-                .find(|d| (d.get_id() == dev) & (d.get_class() == class)),
-            (Some(class), None) => devices.iter().find(|d| d.get_class() == class),
-            (None, Some(dev)) => devices.iter().find(|d| d.get_id() == dev),
-            (None, None) => Some(&devices[0]),
+    let devices: Vec<device::Device> = device::read_devices(&cli.class, &cli.device);
+    let dev_: Option<&device::Device> = devices.first();
+    let min_value = match ValueUpdate::from_str(&cli.min_value) {
+        Ok(update) => update,
+        Err(err) => {
+            println!("Error {}", err);
+            exit(1);
         }
     };
 
@@ -66,13 +66,6 @@ fn main() {
         std::process::exit(1)
     }
     let device: &device::Device = dev_.unwrap();
-
-    let min_value = structs::Value {
-        val: cli.min_value,
-        v_type: enums::ValueType::ABSOLUTE,
-        d_type: enums::DeltaType::DIRECT,
-        sign: enums::Sign::PLUS,
-    };
 
     match &cli.command {
         Some(Commands::Info) | Some(Commands::I) | None => {
@@ -97,11 +90,20 @@ fn main() {
             println!("{}", device.get_max_brightness())
         }
         Some(Commands::Set { value }) | Some(Commands::S { value }) => {
-            let parsed_val: structs::Value = structs::parse_value(value);
-            if device.get_max_brightness() < min_value.val {
-                println!("Invalid minimum value {}", min_value.val)
+            let parsed_val_update = match ValueUpdate::from_str(value) {
+                Ok(update) => update,
+                Err(err) => {
+                    println!("Error {}", err);
+                    exit(1);
+                }
+            };
+
+            let computed_min_value = device.compute_min_value(&min_value);
+            if device.get_max_brightness() < computed_min_value {
+                println!("Invalid minimum value {}", cli.min_value)
             }
-            let new_dev = device::write_device(device, &parsed_val, &min_value, cli.pretend);
+            let new_dev =
+                device::write_device(device, &parsed_val_update, computed_min_value, cli.pretend);
             if let Some(dev) = new_dev {
                 println!("{}", dev)
             }

@@ -1,26 +1,25 @@
 use crate::consts;
-use crate::enums::{DeltaType, Sign, ValueType};
-use crate::structs::Value;
+use crate::enums::ValueUpdate;
 use crate::utils::{percent_to_val, val_to_percent};
 use glob::glob;
 use std::borrow::Cow;
 use std::cmp::max;
 use std::fs;
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
-pub struct Device {
-    class: Cow<'static, str>,
-    id: Cow<'static, str>,
-    curr_brightness: u64,
-    max_brightness: u64,
+pub struct Device<'a> {
+    class: Cow<'a, str>,
+    id: Cow<'a, str>,
+    curr_brightness: i64,
+    max_brightness: i64,
 }
 
-impl Device {
-    pub fn get_max_brightness(&self) -> u64 {
+impl Device<'_> {
+    pub fn get_max_brightness(&self) -> i64 {
         self.max_brightness
     }
-    pub fn get_curr_brightness(&self) -> u64 {
+    pub fn get_curr_brightness(&self) -> i64 {
         self.curr_brightness
     }
     pub fn get_id(&self) -> &str {
@@ -30,29 +29,22 @@ impl Device {
         &self.class
     }
 
-    pub fn compute_new_val(&self, value: &Value) -> u64 {
-        let new_val = match value.d_type {
-            DeltaType::DIRECT => match value.v_type {
-                ValueType::ABSOLUTE => value.val,
-                ValueType::RELATIVE => percent_to_val(value.val, self),
-            },
-            DeltaType::DELTA => match value.v_type {
-                ValueType::ABSOLUTE => match value.sign {
-                    Sign::MINUS => self.curr_brightness.saturating_sub(value.val),
-                    Sign::PLUS => value.val + self.curr_brightness,
-                },
-                ValueType::RELATIVE => {
-                    let new_perc = match value.sign {
-                        Sign::MINUS => {
-                            val_to_percent(self.curr_brightness, self).saturating_sub(value.val)
-                        }
-                        Sign::PLUS => val_to_percent(self.curr_brightness, self) + value.val,
-                    };
-                    percent_to_val(new_perc, self)
-                }
-            },
-        };
-        std::cmp::min(new_val, self.get_max_brightness())
+    fn compute_for_val(&self, value: i64, update: &ValueUpdate) -> i64 {
+        match update {
+            ValueUpdate::Delta(x) => value + x,
+            ValueUpdate::Direct(x) => *x,
+            ValueUpdate::Relative(x) => percent_to_val(val_to_percent(value, self) + *x, self),
+            ValueUpdate::Absolute(x) => percent_to_val(*x, self),
+        }
+    }
+
+    pub fn compute_min_value(&self, min_value: &ValueUpdate) -> i64 {
+        self.compute_for_val(self.max_brightness, min_value)
+    }
+
+    pub fn compute_from_update(&self, update_value: &ValueUpdate) -> i64 {
+        let new_val = self.compute_for_val(self.curr_brightness, update_value);
+        std::cmp::max(0, std::cmp::min(new_val, self.get_max_brightness()))
     }
 }
 
@@ -67,89 +59,54 @@ mod tests {
     };
     #[test]
     fn test_compute_new_val_50_percent_plus() {
-        let val_1 = Value {
-            val: 50,
-            v_type: ValueType::RELATIVE,
-            d_type: DeltaType::DELTA,
-            sign: Sign::PLUS,
-        };
-        assert_eq!(DEVICE.compute_new_val(&val_1), 200);
+        let val_1 = ValueUpdate::Relative(50);
+        assert_eq!(DEVICE.compute_from_update(&val_1), 200);
     }
 
     #[test]
     fn test_compute_new_val_no_overflow() {
-        let val_1 = Value {
-            val: 70,
-            v_type: ValueType::RELATIVE,
-            d_type: DeltaType::DELTA,
-            sign: Sign::PLUS,
-        };
+        let val_1 = ValueUpdate::Relative(70);
 
-        assert_eq!(DEVICE.compute_new_val(&val_1), 200);
+        assert_eq!(DEVICE.compute_from_update(&val_1), 200);
     }
 
     #[test]
     fn test_compute_new_val_no_negative() {
-        let val_1 = Value {
-            val: 70,
-            v_type: ValueType::RELATIVE,
-            d_type: DeltaType::DELTA,
-            sign: Sign::MINUS,
-        };
+        let val_1 = ValueUpdate::Relative(-70);
 
-        assert_eq!(DEVICE.compute_new_val(&val_1), 0);
+        assert_eq!(DEVICE.compute_from_update(&val_1), 0);
     }
 
     #[test]
     fn test_compute_new_val_50_percent_minus() {
-        let val_1 = Value {
-            val: 50,
-            v_type: ValueType::RELATIVE,
-            d_type: DeltaType::DELTA,
-            sign: Sign::MINUS,
-        };
+        let val_1 = ValueUpdate::Relative(-50);
 
-        assert_eq!(DEVICE.compute_new_val(&val_1), 0);
+        assert_eq!(DEVICE.compute_from_update(&val_1), 0);
     }
 
     #[test]
     fn test_compute_new_val_50_minus() {
-        let val_1 = Value {
-            val: 50,
-            v_type: ValueType::ABSOLUTE,
-            d_type: DeltaType::DELTA,
-            sign: Sign::MINUS,
-        };
+        let val_1 = ValueUpdate::Delta(-50);
 
-        assert_eq!(DEVICE.compute_new_val(&val_1), 50);
+        assert_eq!(DEVICE.compute_from_update(&val_1), 50);
     }
 
     #[test]
     fn test_compute_new_val_50_percent() {
-        let val_1 = Value {
-            val: 50,
-            v_type: ValueType::RELATIVE,
-            d_type: DeltaType::DIRECT,
-            sign: Sign::PLUS,
-        };
+        let val_1 = ValueUpdate::Absolute(50);
 
-        assert_eq!(DEVICE.compute_new_val(&val_1), 100);
+        assert_eq!(DEVICE.compute_from_update(&val_1), 100);
     }
 
     #[test]
     fn test_compute_new_val_50() {
-        let val_1 = Value {
-            val: 50,
-            v_type: ValueType::ABSOLUTE,
-            d_type: DeltaType::DIRECT,
-            sign: Sign::PLUS,
-        };
+        let val_1 = ValueUpdate::Direct(50);
 
-        assert_eq!(DEVICE.compute_new_val(&val_1), 50);
+        assert_eq!(DEVICE.compute_from_update(&val_1), 50);
     }
 }
 
-impl std::fmt::Display for Device {
+impl std::fmt::Display for Device<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         if f.sign_plus() {
             writeln!(
@@ -175,19 +132,19 @@ impl std::fmt::Display for Device {
     }
 }
 
-pub fn read_device(path: PathBuf, class: &'static str, id: String) -> Device {
+pub fn read_device(path: PathBuf, class: &str, id: String) -> Device {
     let read_brightness =
         fs::read_to_string(format!("{}/{}", path.display(), "brightness")).unwrap();
     let read_max_brightness =
         fs::read_to_string(format!("{}/{}", path.display(), "max_brightness")).unwrap();
-    let curr_brightness = match u64::from_str(read_brightness.trim_end_matches('\n')) {
+    let curr_brightness = match read_brightness.trim_end_matches('\n').parse() {
         Ok(value) => value,
         Err(err) => {
             println!("{:?}, read {:?}", err, read_brightness);
             panic!()
         }
     };
-    let max_brightness = match u64::from_str(read_max_brightness.trim_end_matches('\n')) {
+    let max_brightness = match read_max_brightness.trim_end_matches('\n').parse() {
         Ok(value) => value,
         Err(err) => {
             println!("{:?}, read {:?}", err, read_max_brightness);
@@ -202,13 +159,14 @@ pub fn read_device(path: PathBuf, class: &'static str, id: String) -> Device {
     }
 }
 
-pub fn write_device(
-    device: &Device,
-    value: &Value,
-    min_value: &Value,
+pub fn write_device<'a>(
+    device: &Device<'a>,
+    update_value: &ValueUpdate,
+    min_value: i64,
     pretend: bool,
-) -> Option<Device> {
-    let new_val = max(device.compute_new_val(value), min_value.val);
+) -> Option<Device<'a>> {
+    //let new_val = max(device.compute_new_val(value), min_value);
+    let new_val_bis = max(device.compute_from_update(update_value), min_value);
     let prefix = format!(
         "{}/{}/{}",
         consts::PATH,
@@ -217,10 +175,14 @@ pub fn write_device(
     );
     let path = format!("{}/{}", prefix, "brightness");
     if pretend {
-        println!("Would set {} brightness to {}", device.get_class(), new_val);
+        println!(
+            "Would set {} brightness to {}",
+            device.get_class(),
+            new_val_bis
+        );
         Option::None
     } else {
-        match fs::write(path, format!("{}", new_val)) {
+        match fs::write(path, format!("{}", new_val_bis)) {
             Ok(_) => Some(read_device(
                 PathBuf::from(prefix),
                 match &device.class {
@@ -237,8 +199,13 @@ pub fn write_device(
     }
 }
 
-pub fn read_class(class: &'static str) -> Vec<Device> {
-    let concat_path: &String = &format!("{}/{}/*", consts::PATH, class);
+pub fn read_class<'a>(class: &'a str, device: Option<&'a String>) -> Vec<Device<'a>> {
+    let concat_path: &String = &format!(
+        "{}/{}/{}",
+        consts::PATH,
+        class,
+        device.unwrap_or(&String::from("*"))
+    );
     let mut device_ret: Vec<Device> = Vec::new();
     for entry in glob(concat_path).unwrap() {
         match entry {
@@ -253,10 +220,16 @@ pub fn read_class(class: &'static str) -> Vec<Device> {
     device_ret
 }
 
-pub fn read_devices() -> Vec<Device> {
+pub fn read_devices<'a>(class: &'a Option<String>, device: &'a Option<String>) -> Vec<Device<'a>> {
     let mut devices: Vec<Device> = Vec::new();
-    for class in consts::CLASSES {
-        devices.extend(read_class(class))
+    match class {
+        None => {
+            for class in consts::CLASSES {
+                devices.extend(read_class(class, device.as_ref()))
+            }
+        }
+        Some(class_) => devices.extend(read_class(class_, device.as_ref())),
     }
+
     devices
 }
