@@ -4,12 +4,12 @@ syntax is `{number}{optional %}{optional +-}`
 
 So:
 
-* `5%+` adds 50% of max brightness.
+* `5%+` adds 5% of max brightness to current brightness.
 * `50` sets absolute value of 50.
-* `50+` adds 50 to current value.
+* `50+` adds 50 to current brightness.
 * `5%` sets to 5% of max brightness.
 
-```
+```shell
 Usage: brightctl [OPTIONS] [COMMAND]
 
 Commands:
