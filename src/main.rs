@@ -31,6 +31,12 @@ struct Cli {
 
     #[arg(short, long, global = true)]
     class: Option<String>,
+
+    #[arg(short, long, global = true, default_value_t = false)]
+    preserve: bool,
+
+    #[arg(short, long, global = true, default_value_t = false)]
+    restore: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -47,7 +53,7 @@ enum Commands {
 
 fn main() {
     let cli = Cli::parse();
-    let devices: Vec<device::Device> = device::read_devices(&cli.class, &cli.device);
+    let mut devices: Vec<device::Device> = device::read_devices(&cli.class, &cli.device);
     let dev_: Option<&device::Device> = devices.first();
     let min_value = match ValueUpdate::from_str(&cli.min_value) {
         Ok(update) => update,
@@ -68,9 +74,23 @@ fn main() {
     let device: &device::Device = dev_.unwrap();
 
     match &cli.command {
-        Some(Commands::Info) | Some(Commands::I) | None => {
+        None => {
+            for mut _device in &mut devices {
+                if cli.preserve {
+                    _device.store()
+                } else if cli.restore {
+                    _device.restore()
+                }
+                if !cli.machine_readable {
+                    print!("{}", _device)
+                } else {
+                    print!("{:+}", _device)
+                }
+            }
+        }
+        Some(Commands::Info) | Some(Commands::I) => {
             if cli.list {
-                for device in devices {
+                for device in &devices {
                     if !cli.machine_readable {
                         print!("{}", device)
                     } else {

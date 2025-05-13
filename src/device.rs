@@ -46,6 +46,41 @@ impl Device<'_> {
         let new_val = self.compute_for_val(self.curr_brightness, update_value);
         std::cmp::max(0, std::cmp::min(new_val, self.get_max_brightness()))
     }
+
+    pub fn restore(&mut self) {
+        let path = format!(
+            "{}/{}/{}/{}",
+            consts::RUNTIME_DIR,
+            self.get_class(),
+            self.get_id(),
+            "brightness"
+        );
+        if let Ok(x) = fs::read_to_string(path)
+            .unwrap_or(String::from(""))
+            .trim_end_matches('\n')
+            .parse::<i64>()
+        {
+            self.curr_brightness = x
+        }
+        write_device(self, consts::NONE_UPDATE, 1, false);
+    }
+
+    pub fn store(&self) {
+        let prefix = format!(
+            "{}/{}/{}",
+            consts::RUNTIME_DIR,
+            self.get_class(),
+            self.get_id(),
+        );
+        let path = format!("{}/{}", &prefix, "brightness");
+        fs::create_dir_all(prefix).unwrap();
+        match fs::write(&path, format!("{}", self.curr_brightness)) {
+            Ok(_) => (),
+            Err(err) => {
+                println!("Failed to write device {}: {}", &path, err);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -182,7 +217,7 @@ pub fn write_device<'a>(
         );
         Option::None
     } else {
-        match fs::write(path, format!("{}", new_val_bis)) {
+        match fs::write(&path, format!("{}", new_val_bis)) {
             Ok(_) => Some(read_device(
                 PathBuf::from(prefix),
                 match &device.class {
@@ -192,7 +227,7 @@ pub fn write_device<'a>(
                 device.get_id().to_string(),
             )),
             Err(err) => {
-                println!("Failed to write device: {}", err);
+                println!("Failed to write device {}: {}", path, err);
                 Option::None
             }
         }
