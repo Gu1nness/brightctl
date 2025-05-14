@@ -2,6 +2,7 @@ use crate::consts;
 use crate::enums::ValueUpdate;
 use crate::utils::{percent_to_val, val_to_percent};
 use glob::glob;
+use shellexpand;
 use std::borrow::Cow;
 use std::cmp::max;
 use std::fs;
@@ -48,13 +49,14 @@ impl Device<'_> {
     }
 
     pub fn restore(&mut self) {
-        let path = format!(
+        let path = shellexpand::tilde(&format!(
             "{}/{}/{}/{}",
             consts::RUNTIME_DIR,
             self.get_class(),
             self.get_id(),
             "brightness"
-        );
+        ))
+        .to_string();
         if let Ok(x) = fs::read_to_string(path)
             .unwrap_or(String::from(""))
             .trim_end_matches('\n')
@@ -66,12 +68,13 @@ impl Device<'_> {
     }
 
     pub fn store(&self) {
-        let prefix = format!(
+        let prefix = shellexpand::tilde(&format!(
             "{}/{}/{}",
             consts::RUNTIME_DIR,
             self.get_class(),
             self.get_id(),
-        );
+        ))
+        .to_string();
         let path = format!("{}/{}", &prefix, "brightness");
         fs::create_dir_all(prefix).unwrap();
         match fs::write(&path, format!("{}", self.curr_brightness)) {
