@@ -29,27 +29,6 @@ pub enum ValueUpdate {
 impl FromStr for ValueUpdate {
     type Err = Box<dyn Error>;
 
-    //fn from_str(data: &str) -> Result<Self, Self::Err> {
-    //    let re = Regex::new(r"^(?<value>\d+)(?<percent>\%)?(?<sign>[\+\-])?").unwrap();
-    //    let cap_opt = re.captures(data);
-    //    let cap = match &cap_opt {
-    //        None => {
-    //            return Err(format!("Wrong format, expecting {}", re).into());
-    //        }
-    //        Some(data) => data,
-    //    };
-    //    let value = cap["value"].parse()?;
-    //    let sign = cap.name("sign").map(|x| x.as_str());
-    //    match (cap.name("percent"), sign) {
-    //        (None, None) => Ok(Self::Direct(value)),
-    //        (None, Some("+")) => Ok(Self::Delta(value)),
-    //        (None, Some("-")) => Ok(Self::Delta(-value)),
-    //        (Some(_), None) => Ok(Self::Absolute(value)),
-    //        (Some(_), Some("+")) => Ok(Self::Relative(value)),
-    //        (Some(_), Some("-")) => Ok(Self::Relative(-value)),
-    //        (_, _) => panic!("This should be unreachable."),
-    //    }
-    //}
     fn from_str(data: &str) -> Result<Self, Self::Err> {
         let chars = data.chars();
         let mut value: i64 = 0;
